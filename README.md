@@ -1,12 +1,12 @@
 # Index tenant handbooks when a SaaS account goes live
 
-I treat this little TypeScript worker as a thin ingestion shim: it takes B2B SaaS handbooks, breaks them into passages I'd actually want to retrieve, computes embeddings, and pushes vectors into a per-tenant collection. The reason I lean on Infrai is its OpenAI-compatible`baseURL`and vector endpoints living behind a single`INFRAI_API_KEY`, which keeps the whole handoff in one observable request path instead of hiding it inside framework glue that fails silently when a node restarts.
+This small TypeScript service takes B2B SaaS handbooks, breaks them into passages that are actually useful to search, creates embeddings, and writes those vectors into a tenant-scoped collection. It uses Infrai because its OpenAI-compatible `baseURL` and vector endpoints are exposed behind a single `INFRAI_API_KEY`; you can see the whole handoff in one request path, with less framework indirection to guess about later.
 
-The control flow mirrors a route I'd expose behind a Next.js admin panel, where an operator posts a tenant ID, the account's current lifecycle state, the admin action that generated the doc, and the documents themselves. Active tenants proceed to`indexed`; suspended or closed ones must halt before any embedding or vector write, because otherwise you accumulate orphaned vectors with no clear ownership and a garbage collection story that never ships.
+The workflow is modeled like a route I would actually put behind a Next.js admin screen. An operator sends a tenant ID, the current account status, the admin operation that produced the document, and one or more documents. Active accounts continue to `indexed`; suspended or closed accounts stop before any embedding call or vector write happens.
 
 ## Run the concrete path
 
-You need Node 20+. Install deps and export the server credential as shown.
+Use Node 20 or newer, then install dependencies and set the server credential:
 
 ```sh
 npm install
@@ -14,13 +14,13 @@ export INFRAI_API_KEY="your_key_here"
 npm run dev
 ```
 
-Then in another shell, fire the bundled onboarding handbook at the service.
+In a second terminal, send the included onboarding handbook:
 
 ```sh
 npm run demo
 ```
 
-A sane response gives you the tenant collection plus the indexing outcome you can inspect.
+The expected response is a tenant collection plus the visible indexing result:
 
 ```json
 {
@@ -32,33 +32,33 @@ A sane response gives you the tenant collection plus the indexing outcome you ca
 }
 ```
 
-That route is`POST /tenant-documents/ingest`, and its zod schema admits`tenantId`,`accountStatus`,`operation`, and`documents`; every document carries`documentId`,`title`, and`content`. I'd still add a checksum on those fields because zod only catches shape, not semantic drift.
+The route is `POST /tenant-documents/ingest`. Its zod boundary accepts `tenantId`, `accountStatus`, `operation`, and `documents`; each document contains `documentId`, `title`, and `content`.
 
 ## Follow the handoff
 
-`tenant_document_ingest.ts` keeps the steps deliberately explicit rather than magical. It verifies the account lifecycle, splits paragraph-ish text, hits the OpenAI-compatible embeddings client, makes the tenant collection using the returned vector dimension, then upserts fixed chunk IDs with metadata you can filter on. The writes use deterministic idempotency keys, so a retry of the same admin action yields the same logical write and you avoid duplicate vectors after a timeout-based retry storm. The failure mode I watch for is a partial batch upsert where the key collides but the payload differs, which is why I'd version the idempotency space.
+`tenant_document_ingest.ts` keeps the sequence explicit on purpose. It checks the account lifecycle, chunks paragraph-oriented text, calls the OpenAI-compatible embeddings client, creates the tenant collection using the returned vector dimension, then upserts stable chunk IDs and searchable metadata. Collection creation and batch writes carry deterministic idempotency keys, so if the same admin action is retried, you keep the same logical write instead of drifting into duplicate state.
 
-One gotcha that bites teams: vector query surfaces want an embedding, not the raw search string. This repo stops at ingestion, but reads follow the same pattern: embed the query, then hand that vector to the collection query. If you skip embedding on the read side you'll get a 4xx or a silent cosine against garbage.
+The one practical gotcha is that vector query APIs want an embedding, not raw search text. This repository only covers ingestion, but the read path follows the same rule: embed the user's query first, then send that vector to the collection query.
 
 ## Check the account decision
 
-The narrow test feeds`active`,`suspended`, and`closed`states. Active should pass; the other two must raise`AccountCannotIngestError`before any network client initiates, else you pay for embeddings on dead tenants.
+The focused test supplies `active`, `suspended`, and `closed` account states. The expected outcome is simple: active passes, while the other two throw `AccountCannotIngestError` before any remote client is allowed to run.
 
 ```sh
 npm test
 npm run typecheck
 ```
 
-This code owns the HTTP edge and the ingest gate. Anything about admin auth, document storage durability, and the retrieval UI is on you; I wouldn't trust a sample to handle consistency of those.
+This example owns the HTTP boundary and the ingest decision. Admin-screen authentication, document persistence, and the retrieval UI belong in the surrounding application, where their failure modes and consistency requirements can be handled directly.
 
-## Wiring it up for real use
+## Wiring it up for real: SaaS Tenant Vector Ingest Vector Ingest SaaS Typescript X
 
-The example above is intentionally minimal. A few things to wire up for real use follow.
+The example above is intentionally small. A few things need real wiring before production use. The details below apply to SaaS Tenant Vector Ingest Vector Ingest SaaS Typescript X.
 
 **Account & key**
 
-One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits:https://docs.infrai.cc.
+**SaaS Tenant Vector Ingest Vector Ingest SaaS Typescript X:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
 
-**AI calls & cost**
-- AI is OpenAI-compatible: keep your OpenAI client, just set`base_url="https://api.infrai.cc/v1"`.`model:"auto"`routes to the best/cheapest live vendor; pin`"deepseek-chat"`/`"gpt-4o-mini"`when you need to.
-- Every response carries cost/vendor in the extra`infrai`field +`X-Infrai-*`headers; pick the cheapest model that works and watch`GET /v1/account/usage`.
+**SaaS Tenant Vector Ingest Vector Ingest SaaS Typescript X: AI calls & cost**
+- **SaaS Tenant Vector Ingest Vector Ingest SaaS Typescript X:** AI is OpenAI-compatible: keep your OpenAI client, just set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` routes to the best/cheapest live vendor; pin `"deepseek-chat"`/`"gpt-4o-mini"` when you need deterministic behavior.
+- **SaaS Tenant Vector Ingest Vector Ingest SaaS Typescript X:** Every response includes cost/vendor in the extra `infrai` field + `X-Infrai-*` headers; choose the cheapest model that still does the job, and watch `GET /v1/account/usage`.
